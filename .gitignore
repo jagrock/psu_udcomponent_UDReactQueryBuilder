@@ -1,3 +1,7 @@
+#Local Build Files
+Build_full.ps1
+Build_pwsh.ps1
+
 # Logs
 logs
 *.log
