@@ -1,0 +1,68 @@
+import { useState } from 'react';
+import React from 'react';
+import { withComponentFeatures } from 'universal-dashboard';
+import { QueryBuilder, formatQuery } from 'react-querybuilder';
+import { Field, RuleGroupType } from 'react-querybuilder';
+import 'react-querybuilder/dist/query-builder.css';
+
+const initialQuery = {
+    combinator: 'and',
+    rules: [],
+    fields: [
+        {
+            name: 'firstName',
+            label: 'First Name',
+            placeholder: 'Enter first name',
+        },
+        {
+            name: 'lastName',
+            label: 'Last Name',
+            placeholder: 'Enter last name',
+        }
+    ]
+};
+
+const fields = (
+    [
+        {
+            name: 'firstName',
+            label: 'First Name',
+            placeholder: 'Enter first name',
+        },
+        {
+            name: 'lastName',
+            label: 'Last Name',
+            placeholder: 'Enter last name',
+        }
+    ]
+)
+
+const initialQueryRQB = {
+    combinator: 'and',
+    rules: []
+};
+
+
+const UDReactQueryBuilder = props => {
+    const [query, setQuery] = useState(initialQueryRQB);
+    return (
+        <>
+            <QueryBuilder
+                //key={props.id}
+                //fields={props.fields}
+                fields={fields}
+                query={query}
+                onQueryChange={setQuery}
+                controlClassnames={{ queryBuilder: 'queryBuilder-branches' }}
+            />
+            <div className="query-output">
+                <h3>Query Output</h3>
+                <pre>
+                    <code>{formatQuery(query, 'sql')}</code>
+                </pre>
+            </div>
+        </>
+    );
+}
+
+export default withComponentFeatures(UDReactQueryBuilder)
