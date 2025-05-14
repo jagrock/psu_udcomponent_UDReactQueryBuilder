@@ -15,7 +15,7 @@ module.exports = env => {
         mode: expMode,
         entry: {
             //'index': __dirname + '/index.js'
-            index: path.resolve(__dirname, 'index.js')
+            index: path.resolve(__dirname, './src/index.js')
         },
         output: {
             //library: "ud-reactquerybuilder",
@@ -64,6 +64,7 @@ module.exports = env => {
         },
         externals: {
             UniversalDashboard: 'UniversalDashboard',
+            $: "$",
             'react': 'react',
             'react-dom': 'reactdom'
         },

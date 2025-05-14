@@ -1,7 +1,21 @@
 
 $IndexJs = Get-ChildItem "$PSScriptRoot\index.*.bundle.js"
-#$IndexJs = Get-ChildItem "$PSScriptRoot\*.bundle.js"
 $AssetId = [UniversalDashboard.Services.AssetService]::Instance.RegisterAsset($IndexJs.FullName)
+
+<#
+https://react-querybuilder.js.org/
+
+To-Do:
+Initial Query
+Option to convert dates to timestamp/filetime
+Better ParseNumbers Support
+*-UDElement Support
+Custom Operator support ?New-UDRQBOperator?
+Include more RQB customization options (e.g. combinators between nodes, dateTimePackage, validation, suppress standard classes, antD, etc.. ).
+Example with on page config
+Update to latest RQB - locked to 7.7.1 - when React Mini Error 31 issue resolved
+More FieldBuilder options (e.g. value source)
+#>
 
 function New-UDReactQueryBuilder {
     [CmdletBinding()]
@@ -10,86 +24,121 @@ function New-UDReactQueryBuilder {
         [Parameter()]
         [string]$Id = (New-Guid).ToString(),
 
-        # Formats
+        # Initial Query
         [Parameter()]
-        [ValidateSet('ldap', 'sql', 'json', 'json_without_ids', 'parameterized', 'parameterized_named', 'mongodb', 'mongodb_query', 'cel', 'jsonlogic', 'jsonata', 'elasticsearch', 'spel', 'natural_language')]
+        [hashtable] $InitialQuery = $null,
+
+        # Default Formats
+        [Parameter()]
+        [AllowEmptyString()]
+        [ValidateSet('ldap', 'ldap_escaped', 'sql', 'json', 'json_without_ids', 'parameterized', 'parameterized_named', 'mongodb', 'mongodb_query', 'cel', 'jsonlogic', 'jsonata', 'elasticsearch', 'spel', 'natural_language')]
         [string[]] $Formats,
+        
+        # Custom Formats
+        <# To Add Later - RQB 8.6 added this feature
+        and ldap is now an included format - meeds tweaking
+        #
+        [Parameter()]
+        [ValidateSet('ldap', 'ldap_escaped')]
+        [string[]] $CustomFormats,
+        #>
 
         # Fields
         [Parameter()]
         [scriptblock] $Fields,
-
-        # Option - Show Branches
-        [Parameter()]
-        [Obsolete("The -ShowBranches parameter is deprecated. Please use -controlClassnames instead.")]
-        [switch] $ShowBranches,
         
-        # Option - parseNumbers
+        # Option - parseNumbers in Query
         [Parameter()]
-        [switch] $parseNumbers,
+        [AllowEmptyString()]
+        [ValidateSet('true', 'default', "enhanced", "enhanced-limited", "native", "native-limited", "strict", "strict-limited")]
+        [string] $ParseNumbers,
+        
+        # Option - parseNumbers on Format
+        [Parameter()]
+        [ValidateSet('default', "enhanced", "enhanced-limited", "native", "native-limited", "strict", "strict-limited")]
+        [string[]] $FormatParseNumberOptions,
 
         # Set Options
         [Parameter()]
+        [AllowEmptyString()]
         [ValidateSet('addRuleToNewGroups', 'showCloneButtons', 'showCombinatorsBetweenRules', 'showLockButtons', 'showNotToggle', 'showShiftActions')]
         [string[]] $Options,
 
         # Set control class names
         [Parameter()]
+        [AllowEmptyString()]
         [ValidateSet('queryBuilder-branches', 'justifiedLayout')]
-        [string[]] $controlClassnames
+        [string[]] $ControlClassnames,
+
+        # Show formatQuery options - use Event data for now
+        [Parameter(DontShow=$true)]
+        [switch] $ShowQueryFormatOption,
+
+        # Show parseNumber options - use Event data for now
+        [Parameter(DontShow=$true)]
+        [switch] $ShowParseNumberOption,
+
+        # Handle Changes
+        [Parameter()]
+        [Endpoint] $OnChange
     )
     begin {}
     process {
-        $hashRQB = @{
-            assetId  = $AssetId
-            isPlugin = $true
-            type     = "ud-reactquerybuilder"
-            id       = $Id
+
+        if ($OnChange) {
+            $OnChange.Register($Id, $PSCmdlet)
         }
 
+        $hashProps = @{
+            #PSU Required Props
+            assetId               = $AssetId
+            isPlugin              = $true
+            type                  = "ud-reactquerybuilder"
+            id                    = $Id
+            onChange              = $OnChange
+            
+            #Component Props
+            # The Props required by the component:  <QueryBuilder>
+            # query, fields, options, controlClassnames
+            query                 = @{ 
+                combinator = 'and'
+                rules = @()
+            }
+            queryBuilder          = @{}
+            #showQueryFormatOption = $ShowQueryFormatOption
+            #showParseNumberOption = $ShowParseNumberOption
+        }
+
+        #region Component Props        
         if ($PSBoundParameters.ContainsKey('Fields')) {
-            $hashRQB.fields = [array]$Fields.Invoke()
+            $hashProps.queryBuilder.fields = [array]$Fields.Invoke()
+            #$hashProps.fields = [array]$Fields.Invoke()
         }
-        if ($PSBoundParameters.ContainsKey('Formats')) {
-            $hashRQB.formats = [array]$Formats
-        }
-
-        if ($parseNumbers) {
-            $hashRQB.$parseNumbers = "strict-limited"
-        }
-
-        if ($PSBoundParameters.ContainsKey('Options')) {
+        if ($PSBoundParameters.ContainsKey('Options') -and $null -ne $Options) {
             foreach ($opt in $Options) {
-                $hashRQB.$opt = $true
+                $hashProps.queryBuilder.$opt = $true
+                #$hashProps.$opt = $true
             }
         }
-
-        if ($PSBoundParameters.ContainsKey('controlClassnames')) {
-            #$controls = "queryBuilder: '{0}" -f ($controlClassnames -join ' ')
-            $hashRQB.controlClassnames = @{queryBuilder = $controlClassnames -join ' ' }
+        if ($ParseNumbers) {
+            #need to add support to return formatQuery with and without parsed numbers
+            $hashProps.queryBuilder.parseNumbers = $ParseNumbers
+            #$hashProps.parseNumbers = $parseNumbers
         }
-
-        if ($ShowBranches) {
-            if ($PSBoundParameters.ContainsKey('controlClassnames') -ne $true) {
-                $hashRQB.controlClassnames = "queryBuilder: 'queryBuilder-branches'"
-            }
-            else {
-                Write-Warning "The -ShowBranches parameter is deprecated. Please use -controlClassnames instead."
-            }
+        if ($PSBoundParameters.ContainsKey('controlClassnames') -and $null -ne $controlClassnames) {
+            $hashProps.queryBuilder.controlClassnames = @{queryBuilder = $controlClassnames -join ' ' }
+            #$hashProps.controlClassnames = @{queryBuilder = $controlClassnames -join ' ' }
+        }
+        #endregion
+        
+        #region Custom Props to Pass to Component
+        if ($PSBoundParameters.ContainsKey('Formats')) {
+            $hashProps.formats = [array]$Formats
         }
         
-
-        if ($PSBoundParameters.ContainsKey('Verbose')) {
-            $jsonParams = $PSBoundParameters | ConvertTo-Json
-            Set-UDElement -Id 'qbParams' -Content {
-                $jsonParams
-                $PSScriptRoot
-                New-UDTable -data $hashRQB
-                New-UDTable -data ($PSBoundParameters)
-            }
-        }
+        #endregion
         
-        return $hashRQB
+        return $hashProps
     }
     end {
     
@@ -127,10 +176,10 @@ function New-UDReactQueryBuilderField {
             'GreaterThanOrEqual',
             'LessThan',
             'LessThanOrEqual',
-            'Contains', #Ldap like
+            'Contains',
             'BeginsWith',
             'EndsWith',
-            'NotContains', #ldap NotLike
+            'NotContains',
             'NotBeginsWith',
             'NotEndsWith',
             'isNull',
@@ -140,43 +189,81 @@ function New-UDReactQueryBuilderField {
             'Between',
             'notBetween'
         )]
-        [string[]] $Operators,
+        [string[]] $DefaultOperators,
 
-        # LDAP Operators
+        # LDAP/Custom Operators
         [Parameter()]
         [ValidateSet(
             'Like',
+            'NotLike',
             'MemberOf',
+            'NotMemberOf',
             'MemberOfRecursive',
-            'ExtensibleMatch'
+            'NotMemberOfRecursive',
+            'ExtensibleMatch',
+            'NotExtensibleMatch',
+            'MatchingRuleInChain',
+            'NotMatchingRuleInChain',
+            'BitWiseAnd',
+            'NotBitWiseAnd',
+            'BitWiseOr',
+            'NotBitWiseOr'
         )]
-        [string[]] $LdapOperators
+        [string[]] $CustomOperators
     )
     Begin {
         
         $rqbOperators = @{
-            Equal              = @{Value = '='; Label = '=' }
-            NotEqual           = @{Value = '!='; Label = '!=' }
-            GreaterThan        = @{Value = '>'; Label = '>' }
-            GreaterThanOrEqual = @{Value = '>='; Label = '>=' }
-            LessThan           = @{Value = '<'; Label = '<' }
-            LessThanOrEqual    = @{Value = '<='; Label = '<=' }
-            Contains           = @{Value = 'contains'; Label = 'contains' }
-            BeginsWith         = @{Value = 'beginsWith'; Label = 'begins with' }
-            EndsWith           = @{Value = 'endsWith'; Label = 'ends with' }
-            NotContains        = @{Value = 'doesNotContains'; Label = 'does not contain' }
-            NotBeginsWith      = @{Value = 'doesNotBeginWith'; Label = 'does not begin with' }
-            NotEndsWith        = @{Value = 'doesNotEndWith'; Label = 'does not end with' }
-            isNull             = @{Value = 'null'; Label = 'isNull' }
-            isNotNull          = @{Value = 'notNull'; Label = 'is not null' }
-            in                 = @{Value = 'in'; Label = 'in' }
-            notIn              = @{Value = 'notIn'; Label = 'not in' }
-            Between            = @{Value = 'between'; Label = 'between' }
-            notBetween         = @{Value = 'notBetween'; Label = ' not between' }
-            Like               = @{Value = 'like'; Label = 'like' }
-            MemberOf           = @{Value = 'memberOf'; Label = 'direct member of' }
-            MemberOfRecursive  = @{Value = 'memberOfRecursive'; Label = 'nested member of' }
-            ExtensibleMatch    = @{Value = 'extensibleMatch'; Label = 'extensible match' }
+            #Default
+            Equal                  = @{Value = '='; Label = '=' }
+            NotEqual               = @{Value = '!='; Label = '!=' }
+            
+            GreaterThan            = @{Value = '>'; Label = '>' }
+            GreaterThanOrEqual     = @{Value = '>='; Label = '>=' }
+            
+            LessThan               = @{Value = '<'; Label = '<' }
+            LessThanOrEqual        = @{Value = '<='; Label = '<=' }
+            
+            Contains               = @{Value = 'contains'; Label = 'contains' }
+            NotContains            = @{Value = 'doesNotContain'; Label = 'does not contain' }
+            
+            BeginsWith             = @{Value = 'beginsWith'; Label = 'begins with' }
+            NotBeginsWith          = @{Value = 'doesNotBeginWith'; Label = 'does not begin with' }
+            
+            EndsWith               = @{Value = 'endsWith'; Label = 'ends with' }
+            NotEndsWith            = @{Value = 'doesNotEndWith'; Label = 'does not end with' }
+            
+            isNull                 = @{Value = 'null'; Label = 'isNull' }
+            isNotNull              = @{Value = 'notNull'; Label = 'is not null' }
+            
+            in                     = @{Value = 'in'; Label = 'in' }
+            notIn                  = @{Value = 'notIn'; Label = 'not in' }
+            
+            Between                = @{Value = 'between'; Label = 'between' }
+            notBetween             = @{Value = 'notBetween'; Label = ' not between' }
+            
+            #Custom
+            Like                   = @{Value = 'like'; Label = 'like' }
+            NotLike                = @{Value = 'notLike'; Label = 'not like' }
+            
+            MemberOf               = @{Value = 'memberOf'; Label = 'direct member of' }
+            notMemberOf            = @{Value = 'notMemberOf'; Label = 'not direct member of' }
+
+            MemberOfRecursive      = @{Value = 'memberOfRecursive'; Label = 'nested member of' }
+            notMemberOfRecursive   = @{Value = 'notMemberOfRecursive'; Label = 'not nested member of' }
+            
+            MatchingRuleInChain    = @{Value = 'matchingRuleInChain'; Label = 'Matching Rule in Chain' }
+            notMatchingRuleInChain = @{Value = 'notMatchingRuleInChain'; Label = 'not Matching Rule in Chain' }
+
+            ExtensibleMatch        = @{Value = 'extensibleMatch'; Label = 'extensible match' }
+            notExtensibleMatch     = @{Value = 'notExtensibleMatch'; Label = 'not extensible match' }
+
+            BitWiseAnd             = @{Value = 'bitWiseAnd'; Label = 'Bitwise And' }
+            notBitWiseAnd          = @{Value = 'notBitWiseAnd'; Label = 'not Bitwise And' }
+
+            BitWiseOr              = @{Value = 'bitWiseOr'; Label = 'Bitwise Or' }
+            notBitWiseOr           = @{Value = 'notBitWiseOr'; Label = 'not Bitwise Or' }
+        
         }        
         
         $field = @{}
@@ -194,6 +281,11 @@ function New-UDReactQueryBuilderField {
         if ($null -eq $Placeholder -or $Placeholder.length -eq 0) {
             $field.placeholder = $Placeholder
         }
+        if ($PSBoundParameters.ContainsKey('DefaultOperators') -or $PSBoundParameters.ContainsKey('CustomOperators')) {
+            if ($field.ContainsKey('operators') -ne $true) {
+                $field.operators = [System.Collections.Generic.List[object]]::new()
+            }
+        }
 
         switch ($PSBoundParameters.Keys) {
             'ValueEditorType' {
@@ -204,24 +296,18 @@ function New-UDReactQueryBuilderField {
                 $field.InputType = $InputType
             }
 
-            'Operators' {
-                if ($field.ContainsKey('operators') -ne $true) {
-                    $field.operators = [System.Collections.Generic.List[hashtable]]::new()
-                }
-                foreach ($oper in $operators) {
-                    $field.operators.add($rqbOperators.$oper.clone())
+            'DefaultOperators' {
+                foreach ($oper in $DefaultOperators) {
+                    $field.operators.add([pscustomobject]$rqbOperators.$oper)
                 }
             }
 
-            'LdapOperators' {
-                if ($field.ContainsKey('operators') -ne $true) {
-                    $field.operators = [System.Collections.Generic.List[hashtable]]::new()
-                }
-                foreach ($oper in $LdapOperators) {
-                    $field.operators.add($rqbOperators.$oper.clone())
+            'CustomOperators' {
+                foreach ($oper in $CustomOperators) {
+                    $field.operators.add([pscustomobject]$rqbOperators.$oper)                    
                 }
 
-                $field.className = 'ldapField'
+                #$field.className = 'CustomOperator'
             }
 
         }
@@ -233,58 +319,4 @@ function New-UDReactQueryBuilderField {
     }
 }
 
-function Convert-JsonToLdapFilter {
-    param (
-        [string]$Json
-    )
-
-    function Convert-Rules($rulesObject) {
-        $combinator = $rulesObject.combinator
-        $rules = $rulesObject.rules
-        $not = $rulesObject.not
-
-        $ldapParts = @()
-
-        foreach ($rule in $rules) {
-            if ($rule.rules) {
-                # Nested group
-                $nested = Convert-Rules $rule
-                $ldapParts += $nested
-            }
-            else {
-                $field = $rule.field
-                $operator = $rule.operator
-                $value = $rule.value
-
-                switch ($operator) {
-                    '=' { $ldapParts += "($field=$value)" }
-                    '!=' { $ldapParts += "(!($field=$value))" }
-                    'beginsWith' { $ldapParts += "($field=$value*)" }
-                    'contains' { $ldapParts += "($field=*$value*)" }
-                    default { throw "Unsupported operator: $operator" }
-                }
-            }
-        }
-
-        # Combine rules based on combinator
-        if ($combinator -eq 'and') {
-            $filter = "(&" + ($ldapParts -join '') + ")"
-        }
-        elseif ($combinator -eq 'or') {
-            $filter = "(|" + ($ldapParts -join '') + ")"
-        }
-        else {
-            throw "Unsupported combinator: $combinator"
-        }
-
-        if ($not -eq $true) {
-            $filter = "(!${filter})"
-        }
-
-        return $filter
-    }
-
-    $parsedJson = $Json | ConvertFrom-Json
-    return Convert-Rules $parsedJson
-}
     

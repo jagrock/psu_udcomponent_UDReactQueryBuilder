@@ -1,6 +1,7 @@
-#Local Build Files
+#Local Build Files/folders
 Build_full.ps1
 Build_pwsh.ps1
+ignore/
 
 # Logs
 logs
